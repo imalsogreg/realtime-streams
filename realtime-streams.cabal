@@ -32,3 +32,32 @@ library
                        , time
   hs-source-dirs:      src
   default-language:    Haskell2010
+
+test-suite testsuite
+  hs-source-dirs: src test
+  default-language: Haskell2010
+  type: exitcode-stdio-1.0
+  main-is: TestSuite.hs
+  ghc-options: -fhpc
+
+  build-depends:       
+    base                       >= 4.6 && < 5,
+    HUnit,
+    io-streams                 >= 1.1 && < 1.2,
+    QuickCheck,
+    realtime-streams           >= 0.1 && < 0.2,
+    test-framework,
+    test-framework-hunit,
+    test-framework-quickcheck2,
+    time
+
+  other-modules: 
+    System.IO.Streams.Realtime
+    System.IO.Streams.Realtime.Demo
+    System.IO.Streams.Realtime.Internal
+                                   
+
+
+source-repository head
+  type:     git
+  location: https://github.com/imalsogreg/realtime-streams.git
