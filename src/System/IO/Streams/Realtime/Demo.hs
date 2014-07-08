@@ -6,8 +6,8 @@ import Data.Time.Clock
 import qualified System.IO.Streams as Streams
 import System.IO.Streams.Realtime
 
-main :: IO ()
-main = do
+demo :: IO ()
+demo = do
   inS <- Streams.fromList [1..100::Int]
   t0  <- getCurrentTime
   tS  <- Streams.fromList [addUTCTime x t0 | x <- [1,1.5..10]]
