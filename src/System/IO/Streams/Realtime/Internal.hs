@@ -7,7 +7,7 @@ import           Control.Concurrent       (forkIO, threadDelay)
 import           Control.Concurrent.Async (race)
 import           Control.Concurrent.STM   (atomically, modifyTVar, newTVar,
                                            readTVar, retry, writeTVar)
-import           Control.Monad            ((>=>), (<=<), when)
+import           Control.Monad            ((<=<), (>=>), when)
 import qualified Data.Map                 as Map
 import           Data.Monoid              (Monoid, mempty, mappend)
 import           Data.Time                (UTCTime)

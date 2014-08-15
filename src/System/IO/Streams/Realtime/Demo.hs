@@ -13,6 +13,6 @@ main = do
   tS  <- Streams.fromList [addUTCTime x t0 | x <- [1,1.5..10]]
 --  let getT = \t0 a -> return $ addUTCTime (fromIntegral (a::Int)) t0
 --  inS'  <- runOpts mempty getT inS
-  inS' <- atTimes' (jitter 0.5) inS tS
+  inS' <- atTimes' (jitter 0 <> compress t0 0.5) inS tS
   outS <- Streams.makeOutputStream (print :: Maybe Int -> IO ())
   Streams.connect inS' outS
