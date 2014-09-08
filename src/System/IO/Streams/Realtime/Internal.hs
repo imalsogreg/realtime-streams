@@ -1,13 +1,16 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module System.IO.Streams.Realtime.Internal where
 
 ------------------------------------------------------------------------------
-import           Control.Concurrent       (forkIO, threadDelay)
-import           Control.Concurrent.Async (race)
-import           Control.Concurrent.STM   (atomically, modifyTVar, newTVar,
-                                           readTVar, retry, writeTVar)
+import           Control.Concurrent       (threadDelay)
+--import           Control.Concurrent.Async (race)
+--import           Control.Concurrent.STM   (atomically, modifyTVar, newTVar,
+--                                           readTVar, retry, writeTVar)
 import           Control.Monad            ((<=<), (>=>), when)
+import           Data.IORef
 import qualified Data.Map                 as Map
 import           Data.Monoid              (Monoid, mempty, mappend)
 import           Data.Time                (UTCTime)
@@ -26,65 +29,51 @@ data TimeOpts = TimeOpts {
 
 
 instance Monoid TimeOpts where
-  mempty = TimeOpts 1 return
+  mempty = TimeOpts 0 return
   TimeOpts r m `mappend` TimeOpts r' m' =
-    TimeOpts (max r r') (m >=> m')
+    TimeOpts (max r r') (m <=< m')
 
 
 ------------------------------------------------------------------------------
-runOpts :: TimeOpts
+runOpts :: forall a. TimeOpts
         -> (UTCTime -> a -> IO UTCTime)
         -> InputStream a
         -> IO (InputStream a)
-runOpts TimeOpts {..} timeOf inS' = do
-  inS <- Streams.lockingInputStream inS'
-  buffer <- atomically $ newTVar Map.empty
-  t0 <- getCurrentTime
-  _ <- forkIO $ feedBuffer buffer inS t0
-  drawFromBuffer buffer
-  
+runOpts TimeOpts {..} timeOf inS = do
+  t0     <- getCurrentTime
+  mapRef <- newIORef Map.empty
+  Streams.makeInputStream $ go mapRef t0
   where
+    go :: IORef (Map.Map UTCTime a) -> UTCTime -> IO (Maybe a)
+    go mR t0 = do
+      m     <- readIORef mR
+      m'    <- pull m t0
+      tNow' <- getCurrentTime
+      (m'', x) <- push m' tNow'
+      writeIORef mR m''
+      return x
 
-    feedBuffer buffer inS t0 = go
-      where
-        go = do
-          a  <- Streams.read inS
-          maybe (return $! ()) (\v -> feedOne buffer t0 v >> go) a
+    needToPull :: Map.Map UTCTime a -> IO Bool
+    needToPull m = getCurrentTime >>= \tNow -> do
+      return $ (||) (Map.null m) $
+        (addUTCTime readAhead tNow) > fst (Map.findMax m)
 
-    feedOne buffer t0 a = do
-      t  <- getCurrentTime
-      aT <- modifyTime <=< (timeOf t0) $ a
-      let dt = diffUTCTime aT (addUTCTime readAhead t)
-      when (dt > 0) (threadDelay $ floor (dt * 1e6))
-      atomically $ modifyTVar buffer (Map.insert aT a)
+    pull :: Map.Map UTCTime a -> UTCTime -> IO (Map.Map UTCTime a)
+    pull m t0 = Streams.read inS >>= \x' -> case x' of
+      Nothing -> return m
+      Just x  -> do
+        xT <- (timeOf t0 >=> modifyTime) x :: IO UTCTime
+        let m' = Map.insert xT x m
+        needPull <- needToPull m'
+        case needPull of
+          False -> return m'
+          True  -> pull m' t0
 
-    drawFromBuffer buffer = Streams.makeInputStream (runRace buffer)
-
-    runRace buffer = do
-      (k,a) <- getBufferHead buffer
-      t <- getCurrentTime 
-      let dt = diffUTCTime k t
-      res <- race
-             (threadDelay $ floor (dt * 1e6))
-             (getNewerBufferHead k buffer)
-      case res of
-        Left  () -> print "Left" >> (return $ Just a)
-        Right () -> do
-          print "Collission"
-          runRace buffer
-
-    getBufferHead buffer = atomically $ do
-      b <- readTVar buffer
-      case Map.minViewWithKey b of
-        Nothing -> retry
-        (Just ((k,a), theRest)) -> do
-          writeTVar buffer theRest
-          return (k,a)
-
-    getNewerBufferHead k buffer = atomically $ do
-      b <- readTVar buffer
-      case Map.minViewWithKey b of
-        Nothing -> retry
-        (Just ((k',_), _)) ->
-          when (k' > k) retry >> 
-          return ()
+    push :: Map.Map UTCTime a -> UTCTime -> IO (Map.Map UTCTime a, Maybe a)
+    push m tNow
+      | Map.null m = return (m,Nothing)
+      | otherwise  = do
+        let (xT,x) = Map.findMin m
+            dt    = diffUTCTime xT tNow
+        threadDelay . floor . (*1e6) $ dt
+        return (Map.deleteMin m, Just x)
